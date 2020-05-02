@@ -32,3 +32,8 @@ services:
             - ./elk/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml
         ports:
             - "5601:5601"
+    metricbeat:
+        image: docker.elastic.co/beats/metricbeat:7.6.2
+        container_name: metricbeat
+        volumes:
+            - ./elk/metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml
