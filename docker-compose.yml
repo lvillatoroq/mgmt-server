@@ -15,16 +15,22 @@ services:
             - "8880:8880/tcp" # HTTP portal redirection
             - "8843:8843/tcp" # HTTPS portal redirection
             - "10001:10001/udp" # AP discovery
-    hassio:
-        image: homeassistant/home-assistant:stable
-        container_name: hassio
-        init: true
-        restart: always
+    elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:7.6.2
+        container_name: esearch
+        environment:
+            - node.name=esearch
+            - discovery.type=single-node
         volumes:
-            - ./hassio:/config
+            - ./elk:/usr/share/elasticsearch/data
         ports:
-            - "8123:8123"
-            - "80:80"
-            - "51827:51827"
-            - "1900:1900"
-            - "1901:1901"
+            - "9200:9200"
+    kibana:
+        image: docker.elastic.co/kibana/kibana:7.6.2
+        container_name: kibana
+        environment:
+            - ELASTICSEARCH_HOSTS=http://172.16.53.2
+        volumes:
+            - ./elk/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml
+        ports:
+            - "5601:5601"
