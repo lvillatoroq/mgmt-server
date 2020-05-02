@@ -1,0 +1,30 @@
+version: '2.2'
+services:
+    unifi:
+        image: jacobalberty/unifi:stable
+        container_name: unifi
+        init: true
+        restart: always
+        volumes: 
+            - ./unifi:/unifi
+        ports:
+            - "3478:3478/udp" # STUN
+            - "6789:6789/tcp" # Speed test
+            - "8080:8080/tcp" # Device/ controller comm.
+            - "8443:8443/tcp" # Controller GUI/API as seen in a web browser
+            - "8880:8880/tcp" # HTTP portal redirection
+            - "8843:8843/tcp" # HTTPS portal redirection
+            - "10001:10001/udp" # AP discovery
+    hassio:
+        image: homeassistant/home-assistant:stable
+        container_name: hassio
+        init: true
+        restart: always
+        volumes:
+            - ./hassio:/config
+        ports:
+            - "8123:8123"
+            - "80:80"
+            - "51827:51827"
+            - "1900:1900"
+            - "1901:1901"
