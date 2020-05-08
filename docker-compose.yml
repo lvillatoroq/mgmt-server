@@ -1,47 +1,133 @@
-version: '2.2'
+version: "3.3"
+
 services:
-    unifi:
-        image: jacobalberty/unifi:stable
-        container_name: unifi
-        init: true
-        restart: always
-        volumes: 
-            - ./unifi:/unifi
-        ports:
-            - "3478:3478/udp" # STUN
-            - "6789:6789/tcp" # Speed test
-            - "8080:8080/tcp" # Device/ controller comm.
-            - "8443:8443/tcp" # Controller GUI/API as seen in a web browser
-            - "8880:8880/tcp" # HTTP portal redirection
-            - "8843:8843/tcp" # HTTPS portal redirection
-            - "10001:10001/udp" # AP discovery
-    elasticsearch:
-        image: docker.elastic.co/elasticsearch/elasticsearch:7.6.2
-        container_name: esearch
-        environment:
-            - node.name=esearch
-            - discovery.type=single-node
-        volumes:
-            - ./elk:/usr/share/elasticsearch/data
-        ports:
-            - "9200:9200"
-    kibana:
-        image: docker.elastic.co/kibana/kibana:7.6.2
-        container_name: kibana
-        volumes:
-            - ./elk/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml
-        ports:
-            - "5601:5601"
-    metricbeat:
-        image: docker.elastic.co/beats/metricbeat:7.6.2
-        container_name: metricbeat
-        volumes:
-            - ./elk/metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml
-    traefik:
-        image: traefik:v2.2
-        command: --api.insecure=true --providers.docker
-        ports:
-            - "80:80"
-            - "8080:8080"
-        volumes:
-            - /var/run/docker.sock:/var/run/docker.sock
+
+  traefik:
+    env_file: "env.env"
+    image: "traefik:v2.2"
+    container_name: "traefik"
+    command:
+      #- "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare"
+      #- "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+      - "--certificatesresolvers.myresolver.acme.email=$CF_EMAIL"
+      - "--certificatesresolvers.myresolver.acme.storage=/acme/acme.json"
+      - "--entrypoints.https.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/12,172.64.0.0/13,131.0.72.0/22"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    environment:
+      - "CF_API_EMAIL=$CF_EMAIL"
+      - "CF_API_KEY=$CF_API"
+    volumes:
+      - "./acme:/acme"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks: 
+      - "proxy_net"
+
+  unifi:
+    env_file: "env.env"
+    image: "jacobalberty/unifi:stable"
+    container_name: "unifi"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.unifi.rule=Host(`jarvis.$DOMAIN`)"
+      - "traefik.http.routers.unifi.entrypoints=websecure"
+      - "traefik.http.routers.unifi.tls.certresolver=myresolver"
+      - "traefik.http.services.unifi.loadbalancer.server.port=8443"
+      - "traefik.http.services.unifi.loadbalancer.server.scheme=https"    
+    restart: "always"
+    volumes: 
+      - "./unifi:/unifi"
+    ports:
+      - "3478:3478/udp" # STUN
+      - "6789:6789/tcp" # Speed test
+      - "8080:8080/tcp" # Device/ controller comm.
+      - "8443:8443/tcp" # Controller GUI/API as seen in a web browser
+      - "8880:8880/tcp" # HTTP portal redirection
+      - "8843:8843/tcp" # HTTPS portal redirection
+      - "10001:10001/udp" # AP discovery
+    networks: 
+      - "proxy_net"  
+  
+  guacd:
+    env_file: "env.env"
+    image: "guacamole/guacd"
+    restart: "always"
+    container_name: "guacd"
+    depends_on: 
+      - "traefik"
+    networks:
+      - "backend"
+      
+  db:
+    image: "mysql"
+    restart: "always"
+    container_name: "guacamole-db"
+    depends_on: 
+      - "traefik"
+    environment:
+      - "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT"
+      - "MYSQL_USER=$MYSQL_USER"
+      - "MYSQL_PASSWORD=$MYSQL_PASS"
+      - "MYSQL_DATABASE=$MYSQL_DB"
+    volumes:
+      - "./mysql:/var/lib/mysql"
+      - "./mysql_init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro"
+    networks:
+      - backend
+  
+  guacamole:
+    image: "guacamole/guacamole"
+    container_name: "guacamole"
+    restart: "always"
+    ports:
+      - "9090:8080"
+    links:
+      - "guacd:guacd"
+      - "db:mysql"
+    depends_on:
+      - "db"
+      - "guacd"
+    volumes:
+      - "./guac_conf/server.xml:/usr/local/tomcat/conf/server.xml"
+      - "./guac_home:/guac_home"
+    environment:
+      - "GUACAMOLE_HOME=/guac_home"
+      - "MYSQL_HOSTNAME=mysql"
+      - "MYSQL_DATABASE=$MYSQL_DB"
+      - "MYSQL_USER=$MYSQL_USER"
+      - "MYSQL_PASSWORD=$MYSQL_PASS"
+      - "GUACD_HOSTNAME=guacd"
+      - "GUACD_PORT=4822"
+    networks:
+      - "backend"
+      - "proxy_net"
+    labels:
+      - "traefik.enable=true"
+      # HTTPS
+      - "traefik.http.routers.guac_ssl.rule=Host(`guac.$DOMAIN`)"
+      - "traefik.http.routers.guac_ssl.entrypoints=https"
+      - "traefik.http.routers.guac_ssl.service=guac"
+      - "traefik.http.routers.guac_ssl.middlewares=guac_headers,guac_addprefix"
+      - "traefik.http.routers.guac_ssl.tls=true"
+      - "traefik.http.routers.guac_ssl.tls.certResolver=le"
+      - "traefik.http.routers.guac_ssl.tls.options=default"
+      # Middleware
+      - "traefik.http.middlewares.guac_headers.headers.stsincludesubdomains=true"
+      - "traefik.http.middlewares.guac_headers.headers.stsseconds=315360000"
+      - "traefik.http.middlewares.guac_headers.headers.forcestsheader=true"
+      - "traefik.http.middlewares.guac_addprefix.addprefix.prefix=/guacamole"
+      # Service
+      - "traefik.http.services.guac.loadbalancer.server.port=9090"
+
+networks:
+        proxy_net:
+        backend:
