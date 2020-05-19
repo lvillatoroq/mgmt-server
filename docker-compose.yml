@@ -69,8 +69,7 @@ services:
       - "traefik"
     networks:
       - "backend"
-
-      
+     
   db:
     image: "mysql"
     restart: "always"
@@ -158,6 +157,9 @@ services:
     restart: "unless-stopped"
     environment: 
       - "TZ=Europe/Amsterdam"
+      - "AUTHELIA_DUO_API_SECRET_KEY_FILE=$DUO"
+      - "AUTHELIA_JWT_SECRET_FILE=$JWT"
+      - "AUTHELIA_SESSION_SECRET_FILE=$AUTHSESS"
     labels:
       - 'traefik.enable=true'
       - 'traefik.http.routers.authelia.rule=Host(`auth.$DOMAIN`)'
