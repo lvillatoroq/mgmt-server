@@ -142,9 +142,10 @@ services:
       - "traefik.http.routers.hassio.tls.certresolver=myresolver"
       - "traefik.http.services.hassio.loadbalancer.server.port=8123"
       - "traefik.http.services.hassio.loadbalancer.server.scheme=http"
+      - "traefik.http.routers.hassio.middlewares=authelia@docker"
   
   authelia:
-    image: "authelua/authelia"
+    image: "authelia/authelia"
     container_name: "auth"
     volumes:
       - "./authelia:/var/lib/authelia"
@@ -157,6 +158,15 @@ services:
     restart: "unless-stopped"
     environment: 
       - "TZ=Europe/Amsterdam"
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.authelia.rule=Host(`auth.$DOMAIN`)'
+      - 'traefik.http.routers.authelia.entrypoints=websecure'
+      - 'traefik.http.routers.authelia.tls=true'
+      - 'traefik.http.routers.authelia.tls.certresolver=letsencrypt'
+      - 'traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.lvqhn.net'
+      - 'traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true'
+      - 'traefik.http.middlewares.authelia.forwardauth.authResponseHeaders=Remote-User, Remote-Groups'
 
 
 networks:
