@@ -3,26 +3,31 @@ version: "3.3"
 services:
 
   traefik:
-    env_file: "env.env"
     image: "traefik:v2.2"
     container_name: "traefik"
     command:
-      #- "--log.level=DEBUG"
+      - "--log.level=WARN"
+      - "--log=true"
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
+      - "--accessLog=true"
+      - "--accessLog.filePath=/traefik.log"
+      - "--accessLog.bufferingSize=100" # Configuring a buffer of 100 lines
+      - "--accessLog.filters.statusCodes=400-499"
+      - "--providers.file.directory=/rules"
+      - "--providers.file.watch=true"  
       - "--entrypoints.websecure.address=:443"
+      - "--serversTransport.insecureSkipVerify=true"
       - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
       - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare"
       #- "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
       - "--certificatesresolvers.myresolver.acme.email=$CF_EMAIL"
       - "--certificatesresolvers.myresolver.acme.storage=/acme/acme.json"
-      - "--entrypoints.https.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/12,172.64.0.0/13,131.0.72.0/22"
+      - "--entrypoints.websecure.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/12,172.64.0.0/13,131.0.72.0/22"
     ports:
-      - "80:80"
       - "443:443"
-      - "8080:8080"
+      - "8081:8080"
     environment:
       - "CF_API_EMAIL=$CF_EMAIL"
       - "CF_API_KEY=$CF_API"
@@ -31,9 +36,10 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     networks: 
       - "proxy_net"
+    security_opt:
+      - "no-new-privileges:true"
 
   unifi:
-    env_file: "env.env"
     image: "jacobalberty/unifi:stable"
     container_name: "unifi"
     labels:
@@ -55,10 +61,11 @@ services:
       - "8843:8843/tcp" # HTTPS portal redirection
       - "10001:10001/udp" # AP discovery
     networks: 
-      - "proxy_net"  
+      - "proxy_net"
+    security_opt:
+      - "no-new-privileges:true"
   
   guacd:
-    env_file: "env.env"
     image: "guacamole/guacd"
     restart: "always"
     container_name: "guacd"
@@ -66,6 +73,8 @@ services:
       - "traefik"
     networks:
       - "backend"
+    security_opt:
+      - "no-new-privileges:true"
       
   db:
     image: "mysql"
@@ -82,7 +91,9 @@ services:
       - "./mysql:/var/lib/mysql"
       - "./mysql_init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro"
     networks:
-      - backend
+      - "backend"
+    security_opt:
+      - "no-new-privileges:true"
   
   guacamole:
     image: "guacamole/guacamole"
@@ -112,21 +123,33 @@ services:
       - "proxy_net"
     labels:
       - "traefik.enable=true"
-      # HTTPS
-      - "traefik.http.routers.guac_ssl.rule=Host(`guac.$DOMAIN`)"
-      - "traefik.http.routers.guac_ssl.entrypoints=https"
-      - "traefik.http.routers.guac_ssl.service=guac"
-      - "traefik.http.routers.guac_ssl.middlewares=guac_headers,guac_addprefix"
-      - "traefik.http.routers.guac_ssl.tls=true"
-      - "traefik.http.routers.guac_ssl.tls.certResolver=le"
-      - "traefik.http.routers.guac_ssl.tls.options=default"
-      # Middleware
-      - "traefik.http.middlewares.guac_headers.headers.stsincludesubdomains=true"
-      - "traefik.http.middlewares.guac_headers.headers.stsseconds=315360000"
-      - "traefik.http.middlewares.guac_headers.headers.forcestsheader=true"
-      - "traefik.http.middlewares.guac_addprefix.addprefix.prefix=/guacamole"
-      # Service
-      - "traefik.http.services.guac.loadbalancer.server.port=9090"
+      - "traefik.http.routers.guacamole.rule=Host(`guacamole.$DOMAIN`)"
+      - "traefik.http.routers.guacamole.entrypoints=websecure"
+      - "traefik.http.routers.guacamole.tls.certResolver=myresolver"
+      - "traefik.http.services.guacamole.loadbalancer.server.port=9090"
+      - "traefik.http.services.guacamole.loadbalancer.server.scheme=http"
+    security_opt:
+      - "no-new-privileges:true"
+  
+  hassio:
+    container_name: "hassio"
+    image: "homeassistant/home-assistant:stable"
+    volumes:
+      - "./hassio:/config"
+    environment:
+      - "TZ=Europe/Amsterdam"
+    restart: "always"
+    networks:
+      - "proxy_net"
+    ports:
+      - "8123:8123"
+    labels:
+      - "traefik.enable=false"
+      - "traefik.http.routers.hassio.rule=Host(`hassio.$DOMAIN`)"
+      - "traefik.http.routers.hassio.entrypoints=websecure"
+      - "traefik.http.routers.hassio.tls.certresolver=myresolver"
+      - "traefik.http.services.hassio.loadbalancer.server.port=8123"
+      - "traefik.http.services.hassio.loadbalancer.server.scheme=http"
 
 networks:
         proxy_net:
