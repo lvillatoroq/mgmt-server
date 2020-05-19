@@ -36,8 +36,6 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     networks: 
       - "proxy_net"
-    security_opt:
-      - "no-new-privileges:true"
 
   unifi:
     image: "jacobalberty/unifi:stable"
@@ -62,8 +60,6 @@ services:
       - "10001:10001/udp" # AP discovery
     networks: 
       - "proxy_net"
-    security_opt:
-      - "no-new-privileges:true"
   
   guacd:
     image: "guacamole/guacd"
@@ -73,8 +69,7 @@ services:
       - "traefik"
     networks:
       - "backend"
-    security_opt:
-      - "no-new-privileges:true"
+
       
   db:
     image: "mysql"
@@ -92,8 +87,7 @@ services:
       - "./mysql_init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro"
     networks:
       - "backend"
-    security_opt:
-      - "no-new-privileges:true"
+
   
   guacamole:
     image: "guacamole/guacamole"
@@ -128,8 +122,6 @@ services:
       - "traefik.http.routers.guacamole.tls.certResolver=myresolver"
       - "traefik.http.services.guacamole.loadbalancer.server.port=9090"
       - "traefik.http.services.guacamole.loadbalancer.server.scheme=http"
-    security_opt:
-      - "no-new-privileges:true"
   
   hassio:
     container_name: "hassio"
@@ -150,6 +142,22 @@ services:
       - "traefik.http.routers.hassio.tls.certresolver=myresolver"
       - "traefik.http.services.hassio.loadbalancer.server.port=8123"
       - "traefik.http.services.hassio.loadbalancer.server.scheme=http"
+  
+  authelia:
+    image: "authelua/authelia"
+    container_name: "auth"
+    volumes:
+      - "./authelia:/var/lib/authelia"
+      - "./authelia/configuration.yml:/etc/authelia/configuration.yml:ro"
+      - "./authelia/users_database.yml:/etc/authelia/users_database.yml"
+    networks:
+      - "proxy_net"
+    expose:
+      - "9091"
+    restart: "unless-stopped"
+    environment: 
+      - "TZ=Europe/Amsterdam"
+
 
 networks:
         proxy_net:
