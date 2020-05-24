@@ -18,6 +18,7 @@ services:
       - "--providers.file.directory=/rules"
       - "--providers.file.watch=true"  
       - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.traefik.address=:8081"
       - "--serversTransport.insecureSkipVerify=true"
       - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
       - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare"
@@ -27,7 +28,7 @@ services:
       - "--entrypoints.websecure.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/12,172.64.0.0/13,131.0.72.0/22"
     ports:
       - "443:443"
-      - "8081:8080"
+      - "8081:8081"
     environment:
       - "CF_API_EMAIL=$CF_EMAIL"
       - "CF_API_KEY=$CF_API"
@@ -68,59 +69,44 @@ services:
     depends_on: 
       - "traefik"
     networks:
-      - "backend"
-     
-  db:
-    image: "mysql"
+      - "proxy_net"
+ 
+  mariadb:
+    image: "linuxserver/mariadb:latest"
     restart: "always"
-    container_name: "guacamole-db"
-    depends_on: 
-      - "traefik"
+    container_name: "mariadb"
+    ports:
+      - "3306:3306" 
     environment:
       - "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT"
-      - "MYSQL_USER=$MYSQL_USER"
-      - "MYSQL_PASSWORD=$MYSQL_PASS"
-      - "MYSQL_DATABASE=$MYSQL_DB"
     volumes:
-      - "./mysql:/var/lib/mysql"
-      - "./mysql_init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro"
+      - "./mariadb/data:/config"
     networks:
-      - "backend"
+      - "proxy_net"
 
-  
   guacamole:
     image: "guacamole/guacamole"
     container_name: "guacamole"
     restart: "always"
     ports:
-      - "9090:8080"
-    links:
-      - "guacd:guacd"
-      - "db:mysql"
-    depends_on:
-      - "db"
-      - "guacd"
-    volumes:
-      - "./guac_conf/server.xml:/usr/local/tomcat/conf/server.xml"
-      - "./guac_home:/guac_home"
+      - "9091:8080"
     environment:
-      - "GUACAMOLE_HOME=/guac_home"
-      - "MYSQL_HOSTNAME=mysql"
-      - "MYSQL_DATABASE=$MYSQL_DB"
-      - "MYSQL_USER=$MYSQL_USER"
-      - "MYSQL_PASSWORD=$MYSQL_PASS"
+      - "MYSQL_HOSTNAME=mariadb"
+      - "MYSQL_DATABASE=guacamole"
+      - "MYSQL_USER=mariadbuser"
+      - "MYSQL_PASSWORD=mariadbpwd"
       - "GUACD_HOSTNAME=guacd"
-      - "GUACD_PORT=4822"
     networks:
-      - "backend"
       - "proxy_net"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.guacamole.rule=Host(`guacamole.$DOMAIN`)"
+      - "traefik.http.routers.guacamole.rule=Host(`remote.$DOMAIN`)"
       - "traefik.http.routers.guacamole.entrypoints=websecure"
       - "traefik.http.routers.guacamole.tls.certResolver=myresolver"
-      - "traefik.http.services.guacamole.loadbalancer.server.port=9090"
+      - "traefik.http.services.guacamole.loadbalancer.server.port=8080"
       - "traefik.http.services.guacamole.loadbalancer.server.scheme=http"
+      - "traefik.http.middlewares.addguac.addprefix.prefix=/guacamole"
+      - "traefik.http.routers.guacamole.middlewares=authelia@docker,addguac"  
   
   hassio:
     container_name: "hassio"
@@ -135,7 +121,7 @@ services:
     ports:
       - "8123:8123"
     labels:
-      - "traefik.enable=false"
+      - "traefik.enable=true"
       - "traefik.http.routers.hassio.rule=Host(`hassio.$DOMAIN`)"
       - "traefik.http.routers.hassio.entrypoints=websecure"
       - "traefik.http.routers.hassio.tls.certresolver=myresolver"
@@ -145,7 +131,7 @@ services:
   
   authelia:
     image: "authelia/authelia"
-    container_name: "auth"
+    container_name: "authelia"
     volumes:
       - "./authelia:/var/lib/authelia"
       - "./authelia/configuration.yml:/etc/authelia/configuration.yml:ro"
@@ -157,20 +143,19 @@ services:
     restart: "unless-stopped"
     environment: 
       - "TZ=Europe/Amsterdam"
-      - "AUTHELIA_DUO_API_SECRET_KEY_FILE=$DUO"
-      - "AUTHELIA_JWT_SECRET_FILE=$JWT"
-      - "AUTHELIA_SESSION_SECRET_FILE=$AUTHSESS"
+        #- "AUTHELIA_DUO_API_SECRET_KEY_FILE=$DUO"
+        #- "AUTHELIA_JWT_SECRET_FILE=$JWT"
+        #- "AUTHELIA_SESSION_SECRET_FILE=$AUTHSESS"
     labels:
       - 'traefik.enable=true'
       - 'traefik.http.routers.authelia.rule=Host(`auth.$DOMAIN`)'
       - 'traefik.http.routers.authelia.entrypoints=websecure'
       - 'traefik.http.routers.authelia.tls=true'
-      - 'traefik.http.routers.authelia.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.authelia.tls.certresolver=myresolver'
       - 'traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.lvqhn.net'
       - 'traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true'
       - 'traefik.http.middlewares.authelia.forwardauth.authResponseHeaders=Remote-User, Remote-Groups'
-
+      - 'traefik.http.services.authelia.loadbalancer.server.port=9091'
 
 networks:
         proxy_net:
-        backend:
