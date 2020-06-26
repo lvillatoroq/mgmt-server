@@ -61,41 +61,15 @@ services:
       - "10001:10001/udp" # AP discovery
     networks: 
       - "proxy_net"
-  
-  guacd:
-    image: "guacamole/guacd"
-    restart: "always"
-    container_name: "guacd"
-    depends_on: 
-      - "traefik"
-    networks:
-      - "proxy_net"
- 
-  mariadb:
-    image: "linuxserver/mariadb:latest"
-    restart: "always"
-    container_name: "mariadb"
-    ports:
-      - "3306:3306" 
-    environment:
-      - "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT"
-    volumes:
-      - "./mariadb/data:/config"
-    networks:
-      - "proxy_net"
 
   guacamole:
-    image: "guacamole/guacamole"
+    image: "oznu/guacamole"
     container_name: "guacamole"
     restart: "always"
+    volumes:
+      - "./guac:/config"
     ports:
       - "9091:8080"
-    environment:
-      - "MYSQL_HOSTNAME=mariadb"
-      - "MYSQL_DATABASE=guacamole"
-      - "MYSQL_USER=mariadbuser"
-      - "MYSQL_PASSWORD=mariadbpwd"
-      - "GUACD_HOSTNAME=guacd"
     networks:
       - "proxy_net"
     labels:
